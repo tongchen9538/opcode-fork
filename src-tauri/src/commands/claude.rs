@@ -923,11 +923,13 @@ pub async fn execute_claude_code(
     project_path: String,
     prompt: String,
     model: String,
+    tab_id: Option<String>,
 ) -> Result<(), String> {
     log::info!(
-        "Starting new Claude Code session in: {} with model: {}",
+        "Starting new Claude Code session in: {} with model: {} (tab: {:?})",
         project_path,
-        model
+        model,
+        tab_id
     );
 
     let claude_path = find_claude_binary(&app)?;
@@ -944,7 +946,7 @@ pub async fn execute_claude_code(
     ];
 
     let cmd = create_system_command(&claude_path, args, &project_path);
-    spawn_claude_process(app, cmd, prompt, model, project_path).await
+    spawn_claude_process(app, cmd, prompt, model, project_path, tab_id).await
 }
 
 /// Continue an existing Claude Code conversation with streaming output
@@ -954,11 +956,13 @@ pub async fn continue_claude_code(
     project_path: String,
     prompt: String,
     model: String,
+    tab_id: Option<String>,
 ) -> Result<(), String> {
     log::info!(
-        "Continuing Claude Code conversation in: {} with model: {}",
+        "Continuing Claude Code conversation in: {} with model: {} (tab: {:?})",
         project_path,
-        model
+        model,
+        tab_id
     );
 
     let claude_path = find_claude_binary(&app)?;
@@ -976,7 +980,7 @@ pub async fn continue_claude_code(
     ];
 
     let cmd = create_system_command(&claude_path, args, &project_path);
-    spawn_claude_process(app, cmd, prompt, model, project_path).await
+    spawn_claude_process(app, cmd, prompt, model, project_path, tab_id).await
 }
 
 /// Resume an existing Claude Code session by ID with streaming output
@@ -987,12 +991,14 @@ pub async fn resume_claude_code(
     session_id: String,
     prompt: String,
     model: String,
+    tab_id: Option<String>,
 ) -> Result<(), String> {
     log::info!(
-        "Resuming Claude Code session: {} in: {} with model: {}",
+        "Resuming Claude Code session: {} in: {} with model: {} (tab: {:?})",
         session_id,
         project_path,
-        model
+        model,
+        tab_id
     );
 
     let claude_path = find_claude_binary(&app)?;
@@ -1011,7 +1017,7 @@ pub async fn resume_claude_code(
     ];
 
     let cmd = create_system_command(&claude_path, args, &project_path);
-    spawn_claude_process(app, cmd, prompt, model, project_path).await
+    spawn_claude_process(app, cmd, prompt, model, project_path, tab_id).await
 }
 
 /// Cancel the currently running Claude Code execution
@@ -1177,6 +1183,7 @@ async fn spawn_claude_process(
     prompt: String,
     model: String,
     project_path: String,
+    tab_id: Option<String>,
 ) -> Result<(), String> {
     use std::sync::Mutex;
     use tokio::io::{AsyncBufReadExt, BufReader};
@@ -1202,17 +1209,12 @@ async fn spawn_claude_process(
     let session_id_holder: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let run_id_holder: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
 
-    // Store the child process in the global state (for backward compatibility)
-    let claude_state = app.state::<ClaudeProcessState>();
-    {
-        let mut current_process = claude_state.current_process.lock().await;
-        // If there's already a process running, kill it first
-        if let Some(mut existing_child) = current_process.take() {
-            log::warn!("Killing existing Claude process before starting new one");
-            let _ = existing_child.kill().await;
-        }
-        *current_process = Some(child);
-    }
+    // Keep a "most-recently-spawned" record for legacy callers that still
+    // touch ClaudeProcessState. Unlike the old behavior, we do NOT kill any
+    // existing child here — multiple tabs must be able to run concurrently.
+    // Child ownership is moved into the wait task below; cancellation goes
+    // through ProcessRegistry's PID-based kill.
+    let _claude_state = app.state::<ClaudeProcessState>();
 
     // Spawn tasks to read stdout and stderr
     let app_handle = app.clone();
@@ -1223,6 +1225,7 @@ async fn spawn_claude_process(
     let project_path_clone = project_path.clone();
     let prompt_clone = prompt.clone();
     let model_clone = model.clone();
+    let tab_id_clone = tab_id.clone();
     let stdout_task = tokio::spawn(async move {
         let mut lines = stdout_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -1268,13 +1271,36 @@ async fn spawn_claude_process(
             if let Some(ref session_id) = *session_id_holder_clone.lock().unwrap() {
                 let _ = app_handle.emit(&format!("claude-output:{}", session_id), &line);
             }
+            // Per-tab event so multiple tabs don't trample each other's generic listeners
+            if let Some(ref tid) = tab_id_clone {
+                let _ = app_handle.emit(&format!("claude-output-tab:{}", tid), &line);
+            }
             // Also emit to the generic event for backward compatibility
             let _ = app_handle.emit("claude-output", &line);
+
+            // Detect end-of-turn: Claude Code emits {"type":"result"} when the assistant
+            // finishes a turn. The subprocess stays alive in interactive mode, so without
+            // this proactive emit the frontend's isLoading state never resets.
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
+                if msg["type"] == "result" {
+                    let success = !msg["is_error"].as_bool().unwrap_or(false);
+                    if let Some(ref session_id) = *session_id_holder_clone.lock().unwrap() {
+                        let _ = app_handle
+                            .emit(&format!("claude-complete:{}", session_id), success);
+                    }
+                    if let Some(ref tid) = tab_id_clone {
+                        let _ = app_handle
+                            .emit(&format!("claude-complete-tab:{}", tid), success);
+                    }
+                    let _ = app_handle.emit("claude-complete", success);
+                }
+            }
         }
     });
 
     let app_handle_stderr = app.clone();
     let session_id_holder_clone2 = session_id_holder.clone();
+    let tab_id_clone2 = tab_id.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = stderr_reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -1283,47 +1309,57 @@ async fn spawn_claude_process(
             if let Some(ref session_id) = *session_id_holder_clone2.lock().unwrap() {
                 let _ = app_handle_stderr.emit(&format!("claude-error:{}", session_id), &line);
             }
+            if let Some(ref tid) = tab_id_clone2 {
+                let _ = app_handle_stderr.emit(&format!("claude-error-tab:{}", tid), &line);
+            }
             // Also emit to the generic event for backward compatibility
             let _ = app_handle_stderr.emit("claude-error", &line);
         }
     });
 
-    // Wait for the process to complete
+    // Wait for the process to complete. We move `child` directly into this
+    // task rather than parking it in shared state so that concurrent sessions
+    // (one per tab) don't fight over a single slot.
     let app_handle_wait = app.clone();
-    let claude_state_wait = claude_state.current_process.clone();
     let session_id_holder_clone3 = session_id_holder.clone();
     let run_id_holder_clone2 = run_id_holder.clone();
     let registry_clone2 = registry.0.clone();
+    let tab_id_clone3 = tab_id.clone();
     tokio::spawn(async move {
         let _ = stdout_task.await;
         let _ = stderr_task.await;
 
-        // Get the child from the state to wait on it
-        let mut current_process = claude_state_wait.lock().await;
-        if let Some(mut child) = current_process.take() {
-            match child.wait().await {
-                Ok(status) => {
-                    log::info!("Claude process exited with status: {}", status);
-                    // Add a small delay to ensure all messages are processed
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
-                        let _ = app_handle_wait
-                            .emit(&format!("claude-complete:{}", session_id), status.success());
-                    }
-                    // Also emit to the generic event for backward compatibility
-                    let _ = app_handle_wait.emit("claude-complete", status.success());
+        let mut owned_child = child;
+        match owned_child.wait().await {
+            Ok(status) => {
+                log::info!("Claude process exited with status: {}", status);
+                // Add a small delay to ensure all messages are processed
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
+                    let _ = app_handle_wait
+                        .emit(&format!("claude-complete:{}", session_id), status.success());
                 }
-                Err(e) => {
-                    log::error!("Failed to wait for Claude process: {}", e);
-                    // Add a small delay to ensure all messages are processed
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
-                        let _ =
-                            app_handle_wait.emit(&format!("claude-complete:{}", session_id), false);
-                    }
-                    // Also emit to the generic event for backward compatibility
-                    let _ = app_handle_wait.emit("claude-complete", false);
+                if let Some(ref tid) = tab_id_clone3 {
+                    let _ = app_handle_wait
+                        .emit(&format!("claude-complete-tab:{}", tid), status.success());
                 }
+                // Also emit to the generic event for backward compatibility
+                let _ = app_handle_wait.emit("claude-complete", status.success());
+            }
+            Err(e) => {
+                log::error!("Failed to wait for Claude process: {}", e);
+                // Add a small delay to ensure all messages are processed
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                if let Some(ref session_id) = *session_id_holder_clone3.lock().unwrap() {
+                    let _ =
+                        app_handle_wait.emit(&format!("claude-complete:{}", session_id), false);
+                }
+                if let Some(ref tid) = tab_id_clone3 {
+                    let _ = app_handle_wait
+                        .emit(&format!("claude-complete-tab:{}", tid), false);
+                }
+                // Also emit to the generic event for backward compatibility
+                let _ = app_handle_wait.emit("claude-complete", false);
             }
         }
 
@@ -1331,9 +1367,6 @@ async fn spawn_claude_process(
         if let Some(run_id) = *run_id_holder_clone2.lock().unwrap() {
             let _ = registry_clone2.unregister_process(run_id);
         }
-
-        // Clear the process from state
-        *current_process = None;
     });
 
     Ok(())

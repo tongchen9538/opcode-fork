@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Bot, FolderCode } from "lucide-react";
 import { api, type Project, type Session, type ClaudeMdFile } from "@/lib/api";
-import { initializeWebMode } from "@/lib/apiAdapter";
+import { apiCall, initializeWebMode } from "@/lib/apiAdapter";
 import { OutputCacheProvider } from "@/lib/outputCache";
 import { TabProvider } from "@/contexts/TabContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -86,6 +86,14 @@ function AppContent() {
   // Initialize web mode compatibility on mount
   useEffect(() => {
     initializeWebMode();
+  }, []);
+
+  // On startup, ensure a Ping Island instance is running (uses bundled copy
+  // when no global install is present). Best-effort, errors are silent.
+  useEffect(() => {
+    apiCall<{ status: string }>('launch_ping_island')
+      .then((result) => console.log('[App] Ping Island bootstrap:', result))
+      .catch((err) => console.warn('[App] Ping Island bootstrap failed:', err));
   }, []);
 
   // Load projects on mount when in projects view

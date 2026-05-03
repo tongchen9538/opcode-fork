@@ -460,13 +460,25 @@ export const Settings: React.FC<SettingsProps> = ({
                           onClick={() => setTheme('custom')}
                           className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                            theme === 'custom' 
-                              ? "bg-background shadow-sm" 
+                            theme === 'custom'
+                              ? "bg-background shadow-sm"
                               : "hover:bg-background/50"
                           )}
                         >
                           {theme === 'custom' && <Check className="h-3 w-3" />}
                           Custom
+                        </button>
+                        <button
+                          onClick={() => setTheme('pixel')}
+                          className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                            theme === 'pixel'
+                              ? "bg-background shadow-sm"
+                              : "hover:bg-background/50"
+                          )}
+                        >
+                          {theme === 'pixel' && <Check className="h-3 w-3" />}
+                          Pixel
                         </button>
                       </div>
                     </div>

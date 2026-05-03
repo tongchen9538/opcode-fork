@@ -37,3 +37,10 @@ CLAUDE.md
 .claude/
 
 .env
+
+# Vendored sidecar binaries — not source-controlled (size, license).
+# Run scripts/fetch-ping-island.sh to populate.
+vendor/
+
+# Build script artifacts (mounted dmg residue)
+/tmp/opcode-fix/

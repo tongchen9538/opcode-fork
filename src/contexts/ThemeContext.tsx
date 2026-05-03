@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
 import { api } from '../lib/api';
 
-export type ThemeMode = 'dark' | 'gray' | 'light' | 'custom';
+export type ThemeMode = 'dark' | 'gray' | 'light' | 'custom' | 'pixel';
 
 export interface CustomThemeColors {
   background: string;
@@ -104,7 +104,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const root = document.documentElement;
     
     // Remove all theme classes
-    root.classList.remove('theme-dark', 'theme-gray', 'theme-light', 'theme-custom');
+    root.classList.remove('theme-dark', 'theme-gray', 'theme-light', 'theme-custom', 'theme-pixel');
     
     // Add new theme class
     root.classList.add(`theme-${themeMode}`);

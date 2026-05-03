@@ -981,4 +981,75 @@ code::-webkit-scrollbar-thumb:hover {
 
 .image-move-to-input {
   animation: moveToInput 0.8s ease-in-out forwards;
-} 
+}
+
+/* ============================================================
+ * Pixel Mode theme — opt-in retro 8-bit aesthetic.
+ * Font: Silkscreen (SIL OFL 1.1) bundled from ping-island.
+ * ============================================================ */
+@font-face {
+  font-family: "Silkscreen";
+  src: url("/fonts/Silkscreen-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.theme-pixel {
+  --color-background: #1a1825;
+  --color-foreground: #f4e8d0;
+  --color-card: #2a2540;
+  --color-card-foreground: #f4e8d0;
+  --color-primary: #f9c74f;
+  --color-primary-foreground: #1a1825;
+  --color-secondary: #3d2c5e;
+  --color-secondary-foreground: #f4e8d0;
+  --color-muted: #2a2540;
+  --color-muted-foreground: #a89bc4;
+  --color-accent: #ff6b9d;
+  --color-accent-foreground: #1a1825;
+  --color-destructive: #ff5252;
+  --color-destructive-foreground: #f4e8d0;
+  --color-border: #4d3d7a;
+  --color-input: #3d2c5e;
+  --color-ring: #f9c74f;
+}
+
+.theme-pixel,
+.theme-pixel * {
+  font-family: "Silkscreen", "Press Start 2P", ui-monospace, monospace !important;
+  letter-spacing: 0.02em;
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.theme-pixel button,
+.theme-pixel .button,
+.theme-pixel [role="button"] {
+  border-radius: 0 !important;
+  border-width: 2px !important;
+  box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.4);
+  transition: transform 80ms steps(2), box-shadow 80ms steps(2);
+}
+
+.theme-pixel button:active,
+.theme-pixel [role="button"]:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 0 rgba(0, 0, 0, 0.4);
+}
+
+.theme-pixel input,
+.theme-pixel textarea {
+  border-radius: 0 !important;
+  border-width: 2px !important;
+}
+
+.theme-pixel [data-color-mode="dark"] {
+  --color-canvas-default: var(--color-background);
+  --color-canvas-subtle: var(--color-card);
+  --color-fg-default: var(--color-foreground);
+  --color-fg-muted: var(--color-muted-foreground);
+  --color-border-default: var(--color-border);
+}
+

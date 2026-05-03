@@ -24,18 +24,19 @@ import { SlashCommandPicker } from "./SlashCommandPicker";
 import { ImagePreview } from "./ImagePreview";
 import { type FileEntry, type SlashCommand } from "@/lib/api";
 
-// Conditional import for Tauri webview window
-let tauriGetCurrentWebviewWindow: any;
-try {
-  if (typeof window !== 'undefined' && window.__TAURI__) {
-    tauriGetCurrentWebviewWindow = require("@tauri-apps/api/webviewWindow").getCurrentWebviewWindow;
-  }
-} catch (e) {
-  console.log('[FloatingPromptInput] Tauri webview API not available, using web mode');
-}
+import { getCurrentWebview as tauriGetCurrentWebview } from "@tauri-apps/api/webview";
 
-// Web-compatible replacement
-const getCurrentWebviewWindow = tauriGetCurrentWebviewWindow || (() => ({ listen: () => Promise.resolve(() => {}) }));
+const isTauriRuntime = () =>
+  typeof window !== 'undefined' && (
+    (window as any).__TAURI_INTERNALS__ ||
+    (window as any).__TAURI__ ||
+    (typeof navigator !== 'undefined' && navigator.userAgent.includes('Tauri'))
+  );
+
+const getCurrentWebview = () =>
+  isTauriRuntime()
+    ? tauriGetCurrentWebview()
+    : ({ onDragDropEvent: () => Promise.resolve(() => {}) } as any);
 
 interface FloatingPromptInputProps {
   /**
@@ -370,7 +371,7 @@ const FloatingPromptInputInner = (
           unlistenDragDropRef.current();
         }
 
-        const webview = getCurrentWebviewWindow();
+        const webview = getCurrentWebview();
         unlistenDragDropRef.current = await webview.onDragDropEvent((event: any) => {
           if (event.payload.type === 'enter' || event.payload.type === 'over') {
             setDragActive(true);
@@ -388,15 +389,13 @@ const FloatingPromptInputInner = (
             lastDropTime = currentTime;
 
             const droppedPaths = event.payload.paths as string[];
-            const imagePaths = droppedPaths.filter(isImageFile);
 
-            if (imagePaths.length > 0) {
+            if (droppedPaths.length > 0) {
               setPrompt(currentPrompt => {
-                const existingPaths = extractImagePaths(currentPrompt);
-                const newPaths = imagePaths.filter(p => !existingPaths.includes(p));
+                const newPaths = droppedPaths.filter(p => !currentPrompt.includes(p));
 
                 if (newPaths.length === 0) {
-                  return currentPrompt; // All dropped images are already in the prompt
+                  return currentPrompt;
                 }
 
                 // Wrap paths with spaces in quotes for clarity

@@ -249,6 +249,7 @@ const TabPanel: React.FC<TabPanelProps> = ({ tab, isActive }) => {
         return (
           <div className="h-full">
             <ClaudeCodeSession
+              tabId={tab.id}
               session={tab.sessionData} // Pass the full session object if available
               initialProjectPath={tab.initialProjectPath || tab.sessionId}
               onBack={() => {

@@ -16,37 +16,35 @@ import { Popover } from "@/components/ui/popover";
 import { api, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// Conditional imports for Tauri APIs
-let tauriListen: any;
+import { listen as tauriListen } from "@tauri-apps/api/event";
+
 type UnlistenFn = () => void;
 
-try {
-  if (typeof window !== 'undefined' && window.__TAURI__) {
-    tauriListen = require("@tauri-apps/api/event").listen;
+// Detect Tauri at call time (globals are injected after module load) and fall back
+// to DOM events only when actually running in a browser context.
+const isTauriRuntime = () =>
+  typeof window !== 'undefined' && (
+    (window as any).__TAURI_INTERNALS__ ||
+    (window as any).__TAURI__ ||
+    (typeof navigator !== 'undefined' && navigator.userAgent.includes('Tauri'))
+  );
+
+const listen = (eventName: string, callback: (event: any) => void) => {
+  if (isTauriRuntime()) {
+    return tauriListen(eventName, callback);
   }
-} catch (e) {
-  console.log('[ClaudeCodeSession] Tauri APIs not available, using web mode');
-}
 
-// Web-compatible replacements
-const listen = tauriListen || ((eventName: string, callback: (event: any) => void) => {
   console.log('[ClaudeCodeSession] Setting up DOM event listener for:', eventName);
-
-  // In web mode, listen for DOM events
   const domEventHandler = (event: any) => {
     console.log('[ClaudeCodeSession] DOM event received:', eventName, event.detail);
-    // Simulate Tauri event structure
     callback({ payload: event.detail });
   };
-
   window.addEventListener(eventName, domEventHandler);
-
-  // Return unlisten function
   return Promise.resolve(() => {
     console.log('[ClaudeCodeSession] Removing DOM event listener for:', eventName);
     window.removeEventListener(eventName, domEventHandler);
   });
-});
+};
 import { StreamMessage } from "./StreamMessage";
 import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingPromptInput";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -63,6 +61,11 @@ import { useTrackEvent, useComponentMetrics, useWorkflowTracking } from "@/hooks
 import { SessionPersistenceService } from "@/services/sessionPersistence";
 
 interface ClaudeCodeSessionProps {
+  /**
+   * Tab ID for routing per-tab events from the backend (avoids generic-event
+   * cross-talk when multiple tabs are running concurrent Claude sessions).
+   */
+  tabId?: string;
   /**
    * Optional session to resume (when clicking from SessionList)
    */
@@ -100,6 +103,7 @@ interface ClaudeCodeSessionProps {
  * <ClaudeCodeSession onBack={() => setView('projects')} />
  */
 export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
+  tabId,
   session,
   initialProjectPath = "",
   className,
@@ -566,7 +570,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         };
 
         // Generic listeners (catch-all)
-        const genericOutputUnlisten = await listen('claude-output', async (event: any) => {
+        // When tabId is set, prefer tab-scoped events from line 1 (no race over
+        // generic 'claude-output' between concurrent tabs). Otherwise fall back
+        // to the legacy generic-then-session-scoped flow.
+        const outputEventName = tabId ? `claude-output-tab:${tabId}` : 'claude-output';
+        const genericOutputUnlisten = await listen(outputEventName, async (event: any) => {
           handleStreamMessage(event.payload);
 
           // Attempt to extract session_id on the fly (for the very first init)
@@ -582,7 +590,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                 if (!extractedSessionInfo) {
                   const projectId = projectPath.replace(/[^a-zA-Z0-9]/g, '-');
                   setExtractedSessionInfo({ sessionId: msg.session_id, projectId });
-                  
+
                   // Save session data for restoration
                   SessionPersistenceService.saveSession(
                     msg.session_id,
@@ -797,13 +805,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           }
         };
 
-        const genericErrorUnlisten = await listen('claude-error', (evt: any) => {
+        const errorEventName = tabId ? `claude-error-tab:${tabId}` : 'claude-error';
+        const genericErrorUnlisten = await listen(errorEventName, (evt: any) => {
           console.error('Claude error:', evt.payload);
           setError(evt.payload);
         });
 
-        const genericCompleteUnlisten = await listen('claude-complete', (evt: any) => {
-          console.log('[ClaudeCodeSession] Received claude-complete (generic):', evt.payload);
+        const completeEventName = tabId ? `claude-complete-tab:${tabId}` : 'claude-complete';
+        const genericCompleteUnlisten = await listen(completeEventName, (evt: any) => {
+          console.log('[ClaudeCodeSession] Received claude-complete (tab/generic):', evt.payload);
           processComplete(evt.payload);
         });
 
@@ -873,13 +883,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           console.log('[ClaudeCodeSession] Resuming session:', effectiveSession.id);
           trackEvent.sessionResumed(effectiveSession.id);
           trackEvent.modelSelected(model);
-          await api.resumeClaudeCode(projectPath, effectiveSession.id, prompt, model);
+          await api.resumeClaudeCode(projectPath, effectiveSession.id, prompt, model, tabId);
         } else {
           console.log('[ClaudeCodeSession] Starting new session');
           setIsFirstPrompt(false);
           trackEvent.sessionCreated(model, 'prompt_input');
           trackEvent.modelSelected(model);
-          await api.executeClaudeCode(projectPath, prompt, model);
+          await api.executeClaudeCode(projectPath, prompt, model, tabId);
         }
       }
     } catch (err) {

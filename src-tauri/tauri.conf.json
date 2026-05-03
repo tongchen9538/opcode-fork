@@ -4,8 +4,9 @@
   "version": "0.2.1",
   "identifier": "opcode.asterisk.so",
   "build": {
-    "beforeDevCommand": "",
+    "beforeDevCommand": "bun run dev",
     "beforeBuildCommand": "bun run build",
+    "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
   "app": {
@@ -72,7 +73,9 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
-    "resources": [],
+    "resources": [
+      "../vendor/Ping Island.app/**/*"
+    ],
     "externalBin": [],
     "copyright": "© 2025 Asterisk. All rights reserved.",
     "category": "DeveloperTool",

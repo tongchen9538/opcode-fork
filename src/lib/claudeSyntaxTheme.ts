@@ -74,6 +74,20 @@ export const getClaudeSyntaxTheme = (theme: ThemeMode): any => {
       keyword: '#c084fc',
       variable: '#a78bfa',
       operator: '#9ca3af',
+    },
+    pixel: {
+      // 8-bit retro palette to match the Pixel theme in styles.css
+      base: '#f4e8d0',
+      background: 'transparent',
+      comment: '#a89bc4',
+      punctuation: '#a89bc4',
+      property: '#f9c74f',
+      tag: '#ff6b9d',
+      string: '#a3e635',
+      function: '#56cfe1',
+      keyword: '#ff6b9d',
+      variable: '#f9c74f',
+      operator: '#f4e8d0',
     }
   };
 
